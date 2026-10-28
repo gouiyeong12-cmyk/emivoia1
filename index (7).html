@@ -190,19 +190,28 @@ let letters=[],filter="all",openId=null,loaded=false,failed=false;
 const ready=!!API_URL;
 if(!ready)$("setup").hidden=false;
 
-async function api(payload){
-  if(!payload){
-    const r=await fetch(API_URL+"?action=list",{cache:"no-store"});
-    if(!r.ok)throw new Error("http");return r.json();
-  }
-  const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
-  if(!r.ok)throw new Error("http");
-  const j=await r.json();if(!j.ok)throw new Error(j.error||"fail");return j;
+let lastError="";
+function explain(e){
+  const m=String(e&&e.message||e);
+  if(m==="network")return "구글 웹 앱에 접근하지 못했어요. Apps Script 배포의 '액세스 권한'이 '모든 사용자'인지 확인하고, 배포 관리에서 새 버전으로 다시 배포해 주세요.";
+  if(m==="notjson")return "구글이 데이터 대신 다른 화면(로그인 또는 오류 페이지)을 보냈어요. 배포의 '실행'이 '나', '액세스 권한'이 '모든 사용자'인지 확인해 주세요.";
+  if(m.startsWith("http"))return "구글 웹 앱이 오류("+m.slice(4)+")를 돌려줬어요. API_URL이 '/exec'로 끝나는 배포 주소인지 확인해 주세요.";
+  return "구글 시트 쪽 오류: "+m;
+}
+async function call(url,opt){
+  let r;try{r=await fetch(url,opt);}catch(e){throw new Error("network");}
+  if(!r.ok)throw new Error("http"+r.status);
+  const t=await r.text();let j;try{j=JSON.parse(t);}catch(e){throw new Error("notjson");}
+  if(!j.ok)throw new Error(j.error||"알 수 없는 오류");return j;
+}
+function api(payload){
+  if(!payload)return call(API_URL+"?action=list",{cache:"no-store"});
+  return call(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
 }
 async function refresh(){
   if(!ready)return;
-  try{const j=await api();letters=(j.letters||[]).sort((a,b)=>a.rnd-b.rnd);loaded=true;failed=false;}
-  catch(e){failed=true;}
+  try{const j=await api();letters=(j.letters||[]).sort((a,b)=>a.rnd-b.rnd);loaded=true;failed=false;lastError="";}
+  catch(e){failed=true;lastError=explain(e);}
   render();
 }
 
@@ -229,14 +238,14 @@ $("form").addEventListener("submit",async e=>{
     $("toast").textContent="편지를 넣었어요. 서클에서 만나요.";setTimeout(()=>$("toast").textContent="",3500);
     refresh();
   }catch(err){
-    $("toast").textContent="편지를 넣지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.";
+    $("toast").textContent="편지를 넣지 못했어요. "+explain(err);
     $("send").disabled=false;
   }
 });
 
 function render(){
   const total=letters.length,done=letters.filter(l=>l.done).length;
-  $("tally").textContent=!ready?"구글 시트 연결을 기다리는 중이에요.":failed?"편지함을 불러오지 못했어요. 잠시 후 새로고침해 주세요.":!loaded?"편지함을 여는 중…":`편지 ${total}통 · 아직 나누지 않은 편지 ${total-done}통`;
+  $("tally").textContent=!ready?"구글 시트 연결을 기다리는 중이에요.":failed?"편지함을 불러오지 못했어요. "+lastError:!loaded?"편지함을 여는 중…":`편지 ${total}통 · 아직 나누지 않은 편지 ${total-done}통`;
   const shown=letters.filter(l=>filter==="all"?true:filter==="done"?l.done:l.topic===filter);
   const list=$("list");list.innerHTML="";
   if(!shown.length){const e=document.createElement("div");e.className="empty";
